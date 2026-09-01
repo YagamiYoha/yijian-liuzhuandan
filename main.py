@@ -7,17 +7,37 @@
   2. 打开 PySide6 原生桌面窗口，加载本地界面；
   3. 若 PySide6/QtWebEngine 不可用（如开发机上没装），退回系统浏览器。
 
-在能上网的 Windows 电脑上用 build_windows.bat 打包成单文件 exe。
+在能上网的 Windows 电脑上用 build_windows.bat 打包成目录版程序。
 """
 
 import faulthandler
 import os
+import platform
 import socket
 import sys
 import threading
 import time
 import traceback
 import webbrowser
+
+
+_QT_DLL_HANDLES = []
+_FAULT_LOG_HANDLE = None
+
+
+def prepare_qt_dll_path():
+    """显式加入 PyInstaller 内置的 Qt/Shiboken DLL 目录。"""
+    if not getattr(sys, "frozen", False):
+        return
+    root = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+    for path in (root, os.path.join(root, "PySide6"), os.path.join(root, "shiboken6")):
+        if not os.path.isdir(path):
+            continue
+        try:
+            _QT_DLL_HANDLES.append(os.add_dll_directory(path))
+        except (AttributeError, OSError):
+            pass
+        os.environ["PATH"] = path + os.pathsep + os.environ.get("PATH", "")
 
 from app import create_app, load_config
 
@@ -34,14 +54,23 @@ def crash_log_path():
 
 
 def log_crash(context, exc):
-    """把异常信息追加写入 exe 旁边的 崩溃日志.log。"""
+    """把启动/桌面异常写成便于外部排查的完整诊断记录。"""
     try:
         with open(crash_log_path(), "a", encoding="utf-8") as f:
             f.write("=" * 70 + "\n")
-            f.write("[%s] %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), context))
+            f.write("发生时间：%s\n" % time.strftime("%Y-%m-%d %H:%M:%S"))
+            f.write("故障位置：%s\n" % context)
+            f.write("程序目录：%s\n" % app_dir())
+            f.write("运行模式：%s\n" % ("打包版 exe" if getattr(sys, "frozen", False) else "源码运行"))
+            f.write("Python：%s\n" % sys.version.replace("\n", " "))
+            f.write("系统：%s\n" % platform.platform())
+            f.write("可执行文件：%s\n" % sys.executable)
+            f.write("异常类型：%s\n" % type(exc).__name__)
+            f.write("异常信息：%s\n\n" % exc)
+            f.write("详细堆栈：\n")
             f.write("".join(traceback.format_exception(
                 type(exc), exc, exc.__traceback__)))
-            f.write("\n")
+            f.write("\n排查提示：请把本日志文件完整发回，并同时说明操作步骤。\n")
     except Exception:
         pass
 
@@ -81,8 +110,10 @@ def wait_until_ready(port, timeout=5.0):
 
 def main():
     # 开启 faulthandler：程序发生原生崩溃(段错误等)时把各线程栈写入崩溃日志
+    global _FAULT_LOG_HANDLE
     try:
-        faulthandler.enable(open(crash_log_path(), "a", encoding="utf-8"))
+        _FAULT_LOG_HANDLE = open(crash_log_path(), "a", encoding="utf-8")
+        faulthandler.enable(_FAULT_LOG_HANDLE)
     except Exception:
         pass
 
@@ -107,6 +138,15 @@ def main():
         log_crash("创建应用失败", e)
         show_error("程序无法启动", "初始化失败：%s" % e)
         return
+
+    prepare_qt_dll_path()
+
+    # 先在主线程加载 Qt 核心 DLL，再启动 Flask/OCR 线程，避免 Windows
+    # 冻结版中 Qt 与 numpy/opencv 原生 DLL 并发初始化导致 QtCore 加载失败。
+    try:
+        import PySide6.QtCore  # noqa: F401
+    except Exception as e:
+        log_crash("Qt 核心模块加载失败", e)
 
     server = threading.Thread(
         target=app.run,

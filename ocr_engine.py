@@ -7,7 +7,10 @@
 """
 
 import os
+import re
 import threading
+import importlib.util
+import datetime
 
 
 class OcrEngine:
@@ -23,8 +26,10 @@ class OcrEngine:
         """检测 rapidocr 是否可用（打包后模型未丢失则应返回 True）。"""
         if self._available is None:
             try:
-                import rapidocr_onnxruntime  # noqa: F401
-                self._available = True
+                # 这里只检查模块是否存在，不实际导入 cv2/numpy/onnxruntime。
+                # 这样桌面窗口初始化时不会与 OCR 原生 DLL 加载发生竞争。
+                self._available = importlib.util.find_spec(
+                    "rapidocr_onnxruntime") is not None
             except Exception:
                 self._available = False
         return self._available
@@ -107,6 +112,181 @@ class OcrEngine:
         xs = [p[0] for p in box]
         ys = [p[1] for p in box]
         return min(xs), max(xs), min(ys), max(ys)
+
+    @staticmethod
+    def _extract_manager_contacts(ocr_items):
+        """按铭牌上的角色标签提取项目经理、负责人及其联系方式。"""
+        texts = [str(item.get("text", "") or "") for item in ocr_items]
+        compact = [re.sub(r"\s+", "", text) for text in texts]
+        phone_pattern = re.compile(
+            r"(?<!\d)(?:1\d{10}|0\d{2,3}[-－]?\d{7,8})(?!\d)")
+        role_defs = [
+            ("manager", ("项目经理", "项目负责人")),
+            ("responsible", ("现场负责人", "施工负责人", "负责人")),
+        ]
+        invalid_name_words = {
+            "姓名", "名称", "手机", "电话", "联系电话", "联系方式", "联系人",
+            "项目经理", "项目负责人", "负责人", "现场负责人", "施工负责人",
+            "文明施工专管员", "文明施工", "专管员", "建设单位", "施工单位", "监理单位", "设计单位",
+            "工程名称", "建设地址", "工程类别", "开工日期", "竣工日期",
+        }
+
+        def role_match(index):
+            text = compact[index]
+            for role, labels in role_defs:
+                for label in labels:
+                    pos = text.find(label)
+                    if pos >= 0:
+                        return role, label, pos, index + 1
+            # 有些铭牌会把“项目经理/负责人”拆成两个 OCR 框，例如“项目”+“经理”。
+            # 将相邻的最多三个框拼接后再判别，但不把远处的普通文字串起来。
+            for span in (2, 3):
+                joined = "".join(compact[index:index + span])
+                for role, labels in role_defs:
+                    for label in labels:
+                        pos = joined.find(label)
+                        if pos >= 0 and pos < len(compact[index]):
+                            return role, label, pos, index + span
+            return None
+
+        def clean_name(text):
+            text = re.sub(r"(?:电话|手机|联系方式|联系人)", "", text)
+            text = re.sub(r"^(?:姓名|名称)", "", text)
+            return text.strip(" \t：:，,；;|/\\-()（）")
+
+        def valid_name(text):
+            """只接受看起来像姓名的内容，拒绝铭牌中的字段表头。"""
+            value = clean_name(text)
+            if not value or value in invalid_name_words:
+                return ""
+            if any(word in value for word in invalid_name_words):
+                return ""
+            if any(word in value for word in ("日期", "单位", "地址", "工程", "类别")):
+                return ""
+            if not re.search(r"[\u4e00-\u9fffA-Za-z]", value):
+                return ""
+            return value
+
+        records = []
+        for index, text in enumerate(compact):
+            match = role_match(index)
+            if not match:
+                continue
+            role, label, pos, value_start = match
+            # 标签完整位于当前 OCR 框时可直接取同行后缀；标签跨框时从下一个框开始取值。
+            suffix = text[pos + len(label):] if value_start == index + 1 else ""
+            phone_match = phone_pattern.search(suffix)
+            phone = phone_match.group(0) if phone_match else ""
+            name = valid_name(
+                suffix[:phone_match.start()] if phone_match else suffix)
+            record = {"role": role, "index": index,
+                      "name": name, "phone": phone}
+            phone_label_seen = bool(re.search(r"(?:电话|手机|联系方式|联系人)", suffix))
+
+            # 铭牌常把标签、姓名、电话拆成相邻几行，按 OCR 顺序补齐。
+            for next_index in range(value_start, min(value_start + 11, len(compact))):
+                if role_match(next_index):
+                    break
+                candidate = compact[next_index]
+                if not candidate:
+                    continue
+                phone_match = phone_pattern.search(candidate)
+                if re.search(r"(?:电话|手机|联系方式|联系人)", candidate):
+                    phone_label_seen = True
+                if phone_match and phone_label_seen and not record["phone"]:
+                    record["phone"] = phone_match.group(0)
+                candidate_name = valid_name(
+                    candidate[:phone_match.start()] if phone_match else candidate)
+                if (not record["name"] and candidate_name and
+                        not any(word in candidate for word in ("电话", "手机", "联系方式"))):
+                    record["name"] = candidate_name
+                if record["name"] and record["phone"]:
+                    break
+            records.append(record)
+
+        return records
+
+    @staticmethod
+    def _normalize_date(text):
+        """从 OCR 文本中提取并校验日期，返回统一的 YYYY-MM-DD。"""
+        match = re.search(
+            r"(?<!\d)(20\d{2})\s*(?:年|[./-])\s*"
+            r"(\d{1,2})\s*(?:月|[./-])\s*(\d{1,2})\s*日?",
+            str(text or ""),
+        )
+        if not match:
+            return ""
+        try:
+            value = datetime.date(
+                int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        except ValueError:
+            return ""
+        return value.isoformat()
+
+    @staticmethod
+    def _extract_labeled_dates(ocr_items, fields):
+        """只从开工/竣工标签附近的明确日期文本中提取日期。"""
+        texts = [str(item.get("text", "") or "") for item in ocr_items]
+        compact = [re.sub(r"\s+", "", text) for text in texts]
+        boxes = [item.get("box") or [] for item in ocr_items]
+        date_fields = [
+            field for field in fields
+            if field.get("key") in ("start_date", "end_date")
+        ]
+        date_candidates = []
+        for index, text in enumerate(texts):
+            normalized = OcrEngine._normalize_date(text)
+            if normalized:
+                date_candidates.append((index, normalized))
+
+        def candidate_score(label_index, candidate_index):
+            """分数越小越近；优先同一行右侧，其次正下方，再按 OCR 顺序。"""
+            label_box = boxes[label_index]
+            value_box = boxes[candidate_index]
+            if label_box and value_box:
+                lx1, lx2, ly1, ly2 = OcrEngine._metrics(label_box)
+                x1, x2, y1, y2 = OcrEngine._metrics(value_box)
+                overlap = min(ly2, y2) - max(ly1, y1)
+                if overlap > 0 and x1 >= lx2 - 2:
+                    return (0, max(0, x1 - lx2))
+                if y1 >= ly2 - 2:
+                    return (1, max(0, y1 - ly2))
+            return (2, abs(candidate_index - label_index))
+
+        extracted = {}
+        used_candidates = set()
+        for field in date_fields:
+            key = field.get("key")
+            keywords = [word for word in field.get("keywords", []) if word]
+            best = None
+            for label_index, text in enumerate(compact):
+                for keyword in keywords:
+                    position = text.find(keyword)
+                    if position < 0:
+                        continue
+                    # 先处理“开工日期：2024-01-01”这种同行写法。
+                    same_line = OcrEngine._normalize_date(
+                        text[position + len(keyword):])
+                    if same_line:
+                        best = ((0, 0), label_index, same_line)
+                        break
+
+                    for candidate_index, normalized in date_candidates:
+                        if candidate_index in used_candidates or candidate_index < label_index:
+                            continue
+                        # 日期值只在标签后面很近的 OCR 范围内考虑，避免串到别的区域。
+                        if candidate_index > label_index + 6:
+                            continue
+                        score = candidate_score(label_index, candidate_index)
+                        item = (score, candidate_index, normalized)
+                        if best is None or item < best:
+                            best = item
+                if best and best[0][0] == 0:
+                    break
+            if best:
+                extracted[key] = best[2]
+                used_candidates.add(best[1])
+        return extracted
 
     @staticmethod
     def auto_extract(ocr_items, fields):
@@ -219,9 +399,15 @@ class OcrEngine:
             return None, None
 
         extracted = {}
+        role_keys = {"manager", "manager_phone", "manager2", "manager2_phone"}
         for field in fields:
             key = field.get("key")
             if not key:
+                continue
+            # 手动字段不能被 OCR 覆盖；角色和日期使用下面的专用、证据约束提取。
+            if field.get("source") == "manual" or key in role_keys:
+                continue
+            if key in {"start_date", "end_date"}:
                 continue
             kws = [k for k in field.get("keywords", []) if k]
             need_digit = field.get("requires_digit", False)
@@ -249,6 +435,31 @@ class OcrEngine:
                 kw, i, j, value = chosen
                 extracted[key] = value
                 used.setdefault(kw, set()).update([i, j])
+
+        # 日期只接受明确的日期格式；没有识别到日期时不返回该字段，前端会保持空白。
+        extracted.update(OcrEngine._extract_labeled_dates(ocr_items, fields))
+
+        # 角色字段单独按「项目经理/负责人」标签分流，避免通用关键词把两者混为一人。
+        role_records = OcrEngine._extract_manager_contacts(ocr_items)
+        manager = next((r for r in role_records if r["role"] == "manager" and r["name"]), None)
+        responsible = next((r for r in role_records if r["role"] == "responsible" and r["name"]), None)
+        if manager:
+            extracted["manager"] = manager["name"]
+            extracted["manager_phone"] = manager["phone"]
+            extracted["manager2"] = responsible["name"] if responsible else ""
+            extracted["manager2_phone"] = responsible["phone"] if responsible else ""
+        elif responsible:
+            # 没有项目经理时，把负责人及电话作为项目经理填入；第二项目经理留空。
+            extracted["manager"] = responsible["name"]
+            extracted["manager_phone"] = responsible["phone"]
+            extracted["manager2"] = ""
+            extracted["manager2_phone"] = ""
+        else:
+            # 没有可靠角色证据时，明确清空四个字段，避免残留通用关键词误判。
+            extracted["manager"] = ""
+            extracted["manager_phone"] = ""
+            extracted["manager2"] = ""
+            extracted["manager2_phone"] = ""
 
         return extracted
 

@@ -20,7 +20,7 @@
 
 <main class="layout">
 
-  <!-- 左列：上传图片 + 识别结果 -->
+  <!-- 左列：上传图片 + 工程信息 -->
   <section class="col">
     <div class="card">
       <div class="card-title"><span class="step">1</span>上传铭牌图片</div>
@@ -36,39 +36,65 @@
       <div class="ocr-status" id="ocr-status" hidden></div>
     </div>
 
-    <div class="card card-grow">
-      <div class="card-title"><span class="step">2</span>识别结果
+    <div class="card">
+      <div class="card-title"><span class="step">2</span>工程信息
+        <span class="tag">OCR 自动填入，可手动修改</span>
+      </div>
+      <div id="info-fields" class="fields-grid"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="step">3</span>识别原文
         <span class="tag">点击文字可复制</span>
       </div>
       <div class="ocr-result" id="ocr-result">
-        <div class="empty-hint">识别出的文字会显示在这里，并按关键词自动填入右侧表单（可手动修改）</div>
+        <div class="empty-hint">识别出的文字会显示在这里</div>
       </div>
     </div>
   </section>
 
-  <!-- 右列：表单 + 附件 + 生成 -->
+  <!-- 右列：工程动向 + 蓝色模块 + 附件 + 生成 -->
   <section class="col">
     <div class="card">
-      <div class="card-title"><span class="step">3</span>填写信息
-        <span class="tag">自动识别 + 手动补充</span>
+      <div class="card-title"><span class="step">4</span>工程动向
+        <span class="tag">对应 Word 绿色区域，手动填写</span>
       </div>
-      <form id="fields-form" class="fields-grid"></form>
+      <div id="trend-fields" class="fields-stack"></div>
     </div>
 
     <div class="card">
-      <div class="card-title"><span class="step">4</span>上传附件
+      <div class="card-title"><span class="step">5</span>蓝色区域填写
+        <span class="tag">可选择，也可手动修改</span>
+      </div>
+      <div id="blue-fields" class="fields-grid"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="step">6</span>Excel 补充信息
+        <span class="tag">用于追加到“万羿辉”最新空白行</span>
+      </div>
+      <div id="excel-fields" class="fields-grid"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="step">7</span>上传附件
         <span class="tag">图片直接插入 Word「附件」位置</span>
       </div>
-      <div class="attach-row">
+      <div class="attach-row" id="attach-dropzone">
         <input type="file" id="attach-input" multiple hidden>
         <button class="btn" id="btn-pick-attach" type="button">选择附件（可多选）</button>
-        <span class="attach-hint">图片附件会插入 Word 模板 {{附件}} 处</span>
+        <span class="attach-hint">也可以把附件直接拖到这里；图片会插入 Word 模板 {{附件}} 处</span>
       </div>
       <ul class="attach-list" id="attach-list"></ul>
     </div>
 
     <div class="card">
-      <div class="card-title"><span class="step">5</span>生成文件</div>
+      <div class="card-title"><span class="step">8</span>生成文件</div>
+      <div class="output-dir-row">
+        <label for="output-dir">输出目录</label>
+        <input id="output-dir" type="text" readonly placeholder="未选择时使用程序 output 文件夹">
+        <button class="btn" id="btn-choose-output" type="button">选择目录</button>
+      </div>
       <button class="btn btn-generate" id="btn-generate" type="button">⚙ 生成 Word / Excel 文件</button>
       <div class="outputs" id="outputs"></div>
       <button class="btn btn-link" id="btn-open-folder" type="button" hidden>📂 打开输出文件夹</button>

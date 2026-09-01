@@ -3,6 +3,7 @@
 let CONFIG = null;
 let currentImage = null;    // { name, url } 铭牌图片
 let attachments = [];       // [{ name, original }] 已上传附件
+let selectedOutputDir = '';
 
 const $ = (id) => document.getElementById(id);
 
@@ -42,38 +43,140 @@ async function init() {
 }
 
 /* ---------- 表单字段 ---------- */
+function localDateIso() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+}
+
+function datePickerValue(value) {
+  const text = String(value || '').trim();
+  const m = text.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+  if (!m) return '';
+  return m[1] + '-' + String(m[2]).padStart(2, '0') + '-' + String(m[3]).padStart(2, '0');
+}
+
+function syncCustomSelect(select, custom) {
+  const active = select.value === '手动输入';
+  custom.hidden = !active;
+  if (!active) custom.value = '';
+}
+
 function buildFields(fields) {
-  const form = $('fields-form');
-  form.innerHTML = '';
+  ['info-fields', 'trend-fields', 'blue-fields', 'excel-fields'].forEach(id => { $(id).innerHTML = ''; });
   (fields || []).forEach(f => {
+    if (f.hidden) return;
+    const target = f.group === '工程信息' ? $('info-fields') :
+      (f.group === '工程动向' ? $('trend-fields') :
+      (f.group === 'Excel补充' ? $('excel-fields') : $('blue-fields')));
     const wrap = document.createElement('div');
-    wrap.className = 'field';
+    wrap.className = 'field field-' + f.key;
 
     const label = document.createElement('label');
     label.textContent = f.label;
     label.htmlFor = 'f-' + f.key;
 
-    const input = document.createElement('input');
-    input.type = 'text';
+    const dateText = f.input_type === 'date' && f.allow_text;
+    const input = f.input_type === 'textarea' ? document.createElement('textarea') :
+      (f.input_type === 'select' ? document.createElement('select') : document.createElement('input'));
+    if (f.input_type !== 'textarea' && f.input_type !== 'select') {
+      input.type = dateText ? 'text' : (f.input_type === 'date' ? 'date' : 'text');
+    }
     input.id = 'f-' + f.key;
     input.dataset.key = f.key;
-    input.placeholder = '请输入' + f.label;
+    input.placeholder = dateText ? '请输入日期，可手写或点击日历' : '请输入' + f.label;
+
+    let inputHolder = input;
+    if (dateText) {
+      const control = document.createElement('div');
+      control.className = 'date-control';
+      const picker = document.createElement('input');
+      picker.type = 'date';
+      picker.className = 'date-picker-native';
+      picker.tabIndex = -1;
+      picker.setAttribute('aria-hidden', 'true');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'date-picker-btn';
+      button.textContent = '📅';
+      button.title = '打开日历选择日期';
+      button.addEventListener('click', () => {
+        picker.value = datePickerValue(input.value);
+        try {
+          if (picker.showPicker) picker.showPicker();
+          else picker.click();
+        } catch (e) {
+          picker.click();
+        }
+      });
+      picker.addEventListener('change', () => {
+        if (picker.value) input.value = picker.value;
+      });
+      control.appendChild(input);
+      control.appendChild(button);
+      control.appendChild(picker);
+      inputHolder = control;
+    }
+
+    if (f.input_type === 'select') {
+      if (f.default === undefined) {
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = '请选择' + f.label;
+        placeholder.disabled = true;
+        placeholder.selected = true;
+        input.appendChild(placeholder);
+      }
+      (f.options || []).forEach(option => {
+        const item = document.createElement('option');
+        item.value = option; item.textContent = option;
+        input.appendChild(item);
+      });
+    }
+    if (f.default !== undefined) input.value = f.default;
+    if (f.default_today) input.value = localDateIso();
 
     wrap.appendChild(label);
-    wrap.appendChild(input);
-    form.appendChild(wrap);
+    wrap.appendChild(inputHolder);
+
+    if (f.input_type === 'select' && f.allow_custom) {
+      const custom = document.createElement('input');
+      custom.type = 'text';
+      custom.className = 'custom-input';
+      custom.dataset.customKey = f.key;
+      custom.placeholder = '请输入自定义' + f.label;
+      custom.hidden = input.value !== '手动输入';
+      input.addEventListener('change', () => syncCustomSelect(input, custom));
+      wrap.appendChild(custom);
+    }
+    target.appendChild(wrap);
   });
 }
 
 function setFieldValue(key, value) {
-  const input = document.querySelector('#fields-form input[data-key="' + key + '"]');
+  const input = document.querySelector('[data-key="' + key + '"]');
   if (!input || !value) return;
-  // 仅填充空字段，避免覆盖用户已输入的内容
-  if (input.value.trim() === '') {
+  const custom = document.querySelector('[data-custom-key="' + key + '"]');
+  if (input.value.trim() !== '' &&
+      !(input.tagName === 'SELECT' && custom &&
+        input.value === '手动输入' && !custom.value.trim())) return;
+  if (input.tagName === 'SELECT' && custom) {
+    const known = Array.from(input.options).some(option => option.value === String(value));
+    if (known) {
+      input.value = String(value);
+      syncCustomSelect(input, custom);
+    } else {
+      input.value = '手动输入';
+      custom.value = String(value);
+      syncCustomSelect(input, custom);
+    }
+  } else {
     input.value = value;
-    input.classList.add('auto-filled');
-    setTimeout(() => input.classList.remove('auto-filled'), 2500);
+    const picker = input.parentElement && input.parentElement.querySelector('.date-picker-native');
+    if (picker) picker.value = datePickerValue(value);
   }
+  input.classList.add('auto-filled');
+  setTimeout(() => input.classList.remove('auto-filled'), 2500);
 }
 
 /* ---------- 图片选择与 OCR ---------- */
@@ -169,20 +272,34 @@ function fallbackCopy(text, done) {
   ta.value = text;
   document.body.appendChild(ta);
   ta.select();
-  try { document.execCommand('copy'); } catch (e) { /* 忽略 */ }
+  let copied = false;
+  try { copied = document.execCommand('copy'); } catch (e) { /* 忽略 */ }
   document.body.removeChild(ta);
-  done();
+  if (copied) done();
+  else toast('复制失败，请手动选择文字复制', true);
 }
 
 /* ---------- 附件上传 ---------- */
 function setupAttachmentUpload() {
   const input = $('attach-input');
+  const dropzone = $('attach-dropzone');
   $('btn-pick-attach').addEventListener('click', () => input.click());
-  input.addEventListener('change', async () => {
-    for (const file of Array.from(input.files)) {
+  const uploadFiles = async (files) => {
+    for (const file of Array.from(files || [])) {
       await uploadAttachment(file);
     }
     input.value = '';
+  };
+  input.addEventListener('change', () => uploadFiles(input.files));
+  dropzone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropzone.classList.add('dragover');
+  });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    uploadFiles(e.dataTransfer.files);
   });
 }
 
@@ -223,6 +340,18 @@ function renderAttachments() {
 
 /* ---------- 生成文件 ---------- */
 function setupGenerate() {
+  $('btn-choose-output').addEventListener('click', async () => {
+    try {
+      const data = await fetchJson('/api/select_output_dir');
+      if (data.path) {
+        selectedOutputDir = data.path;
+        $('output-dir').value = data.path;
+        toast('输出目录已选择');
+      }
+    } catch (e) {
+      toast('选择输出目录失败：' + e.message, true);
+    }
+  });
   $('btn-generate').addEventListener('click', generate);
   $('btn-open-folder').addEventListener('click', async () => {
     try { await fetchJson('/api/open_output_folder'); } catch (e) { /* 忽略 */ }
@@ -231,14 +360,18 @@ function setupGenerate() {
 
 async function generate() {
   const fields = {};
-  document.querySelectorAll('#fields-form input').forEach(i => {
+  document.querySelectorAll('[data-key]').forEach(i => {
     fields[i.dataset.key] = i.value.trim();
+  });
+  document.querySelectorAll('[data-custom-key]').forEach(i => {
+    if (!i.hidden) fields[i.dataset.customKey] = i.value.trim();
   });
 
   const payload = {
     fields: fields,
     image_name: currentImage ? currentImage.name : null,
     attachments: attachments,   // [{name, original}]
+    output_dir: selectedOutputDir || null,
   };
 
   const btn = $('btn-generate');
@@ -250,7 +383,7 @@ async function generate() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    renderOutputs(data.outputs, data.att_notes);
+    renderOutputs(data.outputs, data.att_notes, data.output_folder);
     toast('生成成功！');
   } catch (e) {
     toast('生成失败：' + e.message, true);
@@ -260,7 +393,7 @@ async function generate() {
   }
 }
 
-function renderOutputs(outputs, attNotes) {
+function renderOutputs(outputs, attNotes, outputFolder) {
   const box = $('outputs');
   box.innerHTML = '';
   (outputs || []).forEach(o => {
@@ -272,7 +405,7 @@ function renderOutputs(outputs, attNotes) {
     type.textContent = o.type === 'word' ? 'Word' : 'Excel';
 
     const link = document.createElement('a');
-    link.href = '/output/' + o.name;
+    link.href = o.url || ('/output/' + o.name);
     link.textContent = '⬇ 下载 ' + o.name;
     link.setAttribute('download', o.name);
 
@@ -285,6 +418,12 @@ function renderOutputs(outputs, attNotes) {
     note.className = 'out-note';
     note.textContent = '提示：以下附件为非图片格式，已将其文件名写入 Word「附件」处：' + attNotes.join('、');
     box.appendChild(note);
+  }
+  if (outputFolder) {
+    const folder = document.createElement('div');
+    folder.className = 'out-folder';
+    folder.textContent = '已创建文件夹：' + outputFolder;
+    box.appendChild(folder);
   }
   $('btn-open-folder').hidden = !(outputs || []).length;
 }

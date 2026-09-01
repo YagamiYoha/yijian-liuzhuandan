@@ -126,13 +126,17 @@ body {
 }
 .field { display: flex; flex-direction: column; gap: 4px; }
 .field label { font-size: 12.5px; color: var(--text-light); }
-.field input {
+.field input, .field select, .field textarea {
   border: 1px solid var(--border); border-radius: 6px;
+  width: 100%; min-height: 36px;
   padding: 8px 10px; font-size: 13px; font-family: inherit;
   outline: none; transition: border-color .15s, box-shadow .15s;
   background: #fff; color: var(--text);
 }
-.field input:focus {
+.field textarea {
+  height: 36px; line-height: 1.45; resize: none; overflow-y: auto;
+}
+.field input:focus, .field select:focus, .field textarea:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
@@ -140,9 +144,44 @@ body {
   border-color: var(--success);
   background: #f0fdf6;
 }
+.field-engineering_trend textarea {
+  height: 154px;
+  max-height: 154px;
+  overflow-y: auto;
+}
+.field-construction_change textarea {
+  height: 36px;
+  max-height: 36px;
+  overflow-y: auto;
+}
+.field-danger_points textarea {
+  height: 36px;
+  max-height: 36px;
+  overflow-y: auto;
+}
+.custom-input { margin-top: 6px; }
+.date-control { position: relative; display: flex; align-items: center; gap: 6px; }
+.date-control > input[data-key] { flex: 1; min-width: 0; }
+.date-picker-btn {
+  flex: none; width: 36px; height: 36px; padding: 0;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: #fff; cursor: pointer; font-size: 16px;
+}
+.date-picker-btn:hover { border-color: var(--primary); background: #eef4ff; }
+.date-control .date-picker-native {
+  position: absolute; right: 0; bottom: 0;
+  width: 1px; height: 1px; opacity: 0; pointer-events: none;
+  min-height: 1px; padding: 0; border: 0;
+}
 
 /* ---------- 附件 ---------- */
 .attach-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.attach-row.dragover {
+  padding: 10px;
+  border: 1px dashed var(--primary);
+  border-radius: 7px;
+  background: #eff6ff;
+}
 .attach-hint { font-size: 12px; color: var(--text-light); }
 .attach-list { list-style: none; margin-top: 10px; }
 .attach-list li {
@@ -202,6 +241,21 @@ body {
 .out-item a { color: var(--primary); text-decoration: none; word-break: break-all; }
 .out-item a:hover { text-decoration: underline; }
 .out-note { font-size: 12px; color: #b45309; margin-top: 6px; line-height: 1.6; }
+.output-dir-row {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center; gap: 8px; margin-bottom: 12px;
+}
+.output-dir-row label { font-size: 12.5px; color: var(--text-light); }
+.output-dir-row input {
+  width: 100%; min-width: 0; height: 36px;
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 10px; font-size: 12px; font-family: inherit;
+  background: #f8fafc; color: var(--text-light);
+}
+.out-folder {
+  margin-top: 8px; color: var(--text-light); font-size: 12px;
+  word-break: break-all; line-height: 1.5;
+}
 
 /* ---------- Toast ---------- */
 .toast {
