@@ -1,0 +1,29 @@
+# ===== 开发/运行环境（不提交）=====
+.venv-dev/
+venv/
+__pycache__/
+*.pyc
+
+# ===== 截图工具链（约 300MB）=====
+测试/.shot/
+测试/.chrome-cache/
+测试/.npm-cache/
+
+# ===== 运行时生成的数据（不提交）=====
+output/
+uploads/
+.dsh-vision-router/
+*:memory:.ses
+
+# ===== 测试生成物/真实数据（敏感，不提交）=====
+测试/真实铭牌照片.jpg
+测试/真实铭牌_OCR结果.json
+测试/_ocr_test.png
+测试/ui_preview.html
+测试/ui_preview.png
+测试/.gui-*.js
+测试/.gui-*.css
+
+# ===== 打包产物 =====
+build/
+dist_一键流转单源码.zip

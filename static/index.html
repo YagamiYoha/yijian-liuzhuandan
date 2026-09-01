@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>一键流转单生成工具</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="header-inner">
+    <div class="logo">📋</div>
+    <div class="header-text">
+      <h1 id="app-title">一键流转单生成工具</h1>
+      <p class="subtitle">上传图片 → 离线识别 → 自动填写 → 一键生成 Word / Excel</p>
+    </div>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- 左列：上传图片 + 识别结果 -->
+  <section class="col">
+    <div class="card">
+      <div class="card-title"><span class="step">1</span>上传铭牌图片</div>
+      <div class="dropzone" id="dropzone">
+        <input type="file" id="image-input" accept="image/*" hidden>
+        <div class="dz-hint">选择工程铭牌 / 单据照片，程序将离线识别其中的文字</div>
+        <button class="btn btn-primary" id="btn-pick-image" type="button">选择图片</button>
+      </div>
+      <div class="preview" id="image-preview" hidden>
+        <img id="preview-img" alt="图片预览">
+        <div class="preview-meta" id="preview-meta"></div>
+      </div>
+      <div class="ocr-status" id="ocr-status" hidden></div>
+    </div>
+
+    <div class="card card-grow">
+      <div class="card-title"><span class="step">2</span>识别结果
+        <span class="tag">点击文字可复制</span>
+      </div>
+      <div class="ocr-result" id="ocr-result">
+        <div class="empty-hint">识别出的文字会显示在这里，并按关键词自动填入右侧表单（可手动修改）</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 右列：表单 + 附件 + 生成 -->
+  <section class="col">
+    <div class="card">
+      <div class="card-title"><span class="step">3</span>填写信息
+        <span class="tag">自动识别 + 手动补充</span>
+      </div>
+      <form id="fields-form" class="fields-grid"></form>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="step">4</span>上传附件
+        <span class="tag">图片直接插入 Word「附件」位置</span>
+      </div>
+      <div class="attach-row">
+        <input type="file" id="attach-input" multiple hidden>
+        <button class="btn" id="btn-pick-attach" type="button">选择附件（可多选）</button>
+        <span class="attach-hint">图片附件会插入 Word 模板 {{附件}} 处</span>
+      </div>
+      <ul class="attach-list" id="attach-list"></ul>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="step">5</span>生成文件</div>
+      <button class="btn btn-generate" id="btn-generate" type="button">⚙ 生成 Word / Excel 文件</button>
+      <div class="outputs" id="outputs"></div>
+      <button class="btn btn-link" id="btn-open-folder" type="button" hidden>📂 打开输出文件夹</button>
+    </div>
+  </section>
+
+</main>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

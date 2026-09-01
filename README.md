@@ -1,0 +1,119 @@
+# 一键流转单生成工具（内网离线版）
+
+给公司内网电脑用的桌面小程序：**上传铭牌/单据图片 → 离线 OCR 识别文字 → 自动填入表单 → 一键生成 Word / Excel 文件**。全程离线运行，不依赖互联网。
+
+## 功能一览
+
+- ✅ **离线 OCR**：内置 RapidOCR（PaddleOCR 模型精简版），纯 CPU、纯本地，中英文 + 数字识别
+- ✅ **关键词自动填表**：识别结果按"工程名称、施工单位、电话"等关键词自动填入对应字段，可手动修改
+- ✅ **Word 模板填充**：替换 `{{占位符}}`（正文和表格都支持）、插入铭牌图片、插入附件图片
+- ✅ **Excel 模板填充**：替换单元格里的 `{{占位符}}`
+- ✅ **原生程序窗口**：PySide6 桌面窗口（自己的图标、任务栏、可最小化），不依赖系统浏览器
+- ✅ **绿色部署**：打包成单个 exe，内网电脑双击即用，无需安装 Python / Office
+
+## 目录结构
+
+```
+├── main.py              # 程序入口（打包入口）
+├── desktop.py           # 原生桌面窗口（PySide6 + QtWebEngine）
+├── app.py               # 后端服务（OCR、上传、生成、下载接口）
+├── ocr_engine.py        # 离线 OCR 封装（RapidOCR）
+├── template_filler.py   # Word/Excel 模板填充
+├── config.json          # ★ 字段与模板配置（可按需修改）
+├── requirements.txt     # 依赖清单
+├── build_windows.bat    # ★ Windows 打包脚本
+├── static/              # 前端界面（HTML/CSS/JS，全部本地资源）
+├── templates/           # ★ Word/Excel 模板放这里
+├── uploads/             # 上传的图片/附件（自动创建）
+├── output/              # 生成的文件（自动创建）
+└── 测试/self_test.py     # 本地自测脚本
+```
+
+## 使用流程（内网电脑上）
+
+1. 双击 `一键流转单.exe`，弹出程序窗口
+2. 「① 上传铭牌图片」：选择铭牌/单据照片，程序离线识别文字，自动填入右侧表单
+3. 「③ 填写信息」：核对自动填入的内容，手动补充空缺项
+4. 「④ 上传附件」：上传盖章扫描件等图片（会插入 Word 的"附件"位置）
+5. 「⑤ 生成文件」：一键生成 Word 和 Excel，可直接下载，或点"打开输出文件夹"
+
+## 打包步骤（只需一次，在一台【能上网】的 Windows 电脑上）
+
+1. 安装 **Python 3.10 或 3.11（64 位）**，安装时勾选 `Add Python to PATH`（下载：python.org）
+2. 把整个项目文件夹拷贝到这台电脑
+3. 双击运行 `build_windows.bat`，等待完成（首次约 10~20 分钟）
+4. 打包产物在 `dist\一键流转单.exe`
+
+## 拷贝到内网电脑
+
+把以下 3 样东西放进**同一个文件夹**，整体拷进内网：
+
+- `dist\一键流转单.exe`
+- `config.json`
+- `templates\`（含 Word/Excel 模板）
+
+内网电脑**双击 exe 即用**。若首次运行被安全软件拦截，请在杀软/管理端添加信任白名单。
+
+## 自定义配置（config.json）
+
+| 配置项 | 说明 |
+|---|---|
+| `app.title` | 窗口标题 |
+| `app.port` | 本地服务端口（被占用时自动换空闲端口） |
+| `word.enabled` / `word.template` | 是否生成 Word、模板路径 |
+| `word.output_prefix` | Word 输出文件名前缀（自动加时间戳） |
+| `excel.*` | Excel 同上，`sheet_name` 留空则处理所有工作表 |
+| `fields[].key` | 字段键，对应模板占位符 `{{key}}` |
+| `fields[].label` | 界面上显示的字段名 |
+| `fields[].keywords` | OCR 关键词：识别到含关键词的行时，自动提取关键词后面的内容填入该字段 |
+| `images[].placeholder` | 图片占位符，如 `{{铭牌图片}}`，上传的图片会插入该位置 |
+| `images[].width_cm` | 插入 Word 时图片宽度（厘米） |
+| `attachments[].placeholder` | 附件占位符，默认 `{{附件}}` |
+
+### 模板占位符约定
+
+在 Word / Excel 模板里，把要填的位置写成占位符：
+
+- 文本：`{{project_name}}`、`{{phone}}`、`{{date}}` …（对应 config.json 里 fields 的 key）
+- 铭牌图片：`{{铭牌图片}}`
+- 附件：`{{附件}}`
+
+占位符可以放在 Word 的正文段落或表格单元格里，Excel 的任意单元格里。
+示例模板见 `templates/流转单模板.docx`、`templates/台账模板.xlsx`（运行自测脚本自动生成）。
+
+> 注意：在 Word 里输入占位符后，不要改字体样式到一半（占位符被拆成多个 run 也没关系，程序兼容处理）；图片类附件（png/jpg/bmp 等）会直接插入 Word，PDF 等非图片附件会把文件名写在"附件"处。
+
+## 开发调试（可选，有 Python 的电脑）
+
+```bat
+pip install -r requirements.txt
+python main.py            # 桌面窗口模式（没装 PySide6 时自动退回浏览器）
+python app.py --web       # 直接用浏览器打开界面调试
+python 测试/self_test.py   # 生成示例模板并自测填充/生成链路
+```
+
+## 常见问题（FAQ）
+
+**Q1：首次识别文字很慢？**
+A：正常。首次识别需加载离线模型（约 10~30 秒），之后每次识别只需几秒。
+
+**Q2：识别不准确？**
+A：尽量正对、光线均匀、图片清晰。印刷体识别准确率高；个别错误可在表单里手动修改。字段提取依赖 keywords 关键词，可按实际铭牌写法在 config.json 中增删。
+
+**Q3：生成的 Word 里图片没有插入？**
+A：确认模板里占位符完整且一致（如 `{{铭牌图片}}`），并在界面上传了图片。
+
+**Q4：双击 exe 没反应 / 窗口空白？**
+A：一般是 QtWebEngine 打包资源不全。在打包机把 build_windows.bat 的打包命令加上 `--collect-all PySide6` 重新打包。
+
+**Q5：安全软件报毒？**
+A：PyInstaller 单文件 exe 常见误报，添加信任即可（内网统一管理的话请 IT 加白名单）。
+
+**Q6：公司电脑只有 WPS？**
+A：不影响。程序直接读写 .docx/.xlsx 文件格式，生成的文件 WPS 和微软 Office 都能打开。
+
+**Q7：Excel 能插入图片吗？**
+A：当前版本 Excel 只替换文字占位符（图片插在 Word 里）。如需 Excel 插图可扩展。
+
+**Q8：想改字段、模板后要重新打包吗？**
+A：不用。config.json 和 templates 都在 exe 外面，改完保存即可生效（重启程序）。

@@ -1,0 +1,46 @@
+{
+  "app": {
+    "title": "一键流转单生成工具",
+    "port": 8090,
+    "width": 1180,
+    "height": 820
+  },
+  "word": {
+    "enabled": true,
+    "template": "templates/流转单模板.docx",
+    "output_prefix": "流转单"
+  },
+  "excel": {
+    "enabled": true,
+    "template": "templates/台账模板.xlsx",
+    "output_prefix": "台账",
+    "sheet_name": ""
+  },
+  "fields": [
+    { "key": "project_name", "label": "工程名称", "keywords": ["工程名称", "项目名称"] },
+    { "key": "address", "label": "建设地址", "keywords": ["建设地址", "工程地址", "地址"] },
+    { "key": "owner", "label": "建设单位", "keywords": ["建设单位", "业主单位"] },
+    { "key": "builder", "label": "施工单位", "keywords": ["施工单位", "总包单位", "承建单位"] },
+    { "key": "supervisor", "label": "监理单位", "keywords": ["监理单位"] },
+    { "key": "designer", "label": "设计单位", "keywords": ["设计单位"] },
+    { "key": "category", "label": "工程类别", "keywords": ["工程类别", "结构类型"] },
+    { "key": "area", "label": "建筑面积", "keywords": ["建筑面积"] },
+    { "key": "start_date", "label": "开工日期", "keywords": ["开工日期"] },
+    { "key": "end_date", "label": "竣工日期", "keywords": ["竣工日期"] },
+    { "key": "manager", "label": "项目经理", "keywords": ["项目经理", "项目负责人", "姓名"] },
+    { "key": "manager_phone", "label": "项目经理手机", "keywords": ["手机"], "requires_digit": true },
+    { "key": "site_manager", "label": "文明施工专管员", "keywords": ["文明施工专管员", "专管员", "姓名"] },
+    { "key": "site_phone", "label": "专管员手机", "keywords": ["手机"], "requires_digit": true },
+    { "key": "phone", "label": "联系电话", "keywords": ["电话", "联系电话"], "requires_digit": true },
+    { "key": "serial_no", "label": "流转单编号", "keywords": ["编号", "单号"] },
+    { "key": "reason", "label": "事由", "keywords": ["事由", "事项"] },
+    { "key": "handler", "label": "经办人", "keywords": ["经办人", "经办"] },
+    { "key": "department", "label": "申请部门", "keywords": ["部门"] }
+  ],
+  "images": [
+    { "key": "nameplate", "label": "铭牌图片", "placeholder": "{{铭牌图片}}", "width_cm": 8.0 }
+  ],
+  "attachments": [
+    { "placeholder": "{{附件}}" }
+  ]
+}

@@ -1,0 +1,11 @@
+# 一键流转单生成工具 - 依赖清单
+# 请在【能上网的 Windows 打包机】上安装，建议 Python 3.10 或 3.11（64 位）
+# 说明：内网电脑不需要安装任何东西，所有依赖都会打进 exe
+
+flask>=3.0.0
+python-docx>=1.1.0
+openpyxl>=3.1.0
+rapidocr_onnxruntime>=1.3.20
+onnxruntime>=1.16.0
+PySide6>=6.6.0
+pyinstaller>=6.6.0
