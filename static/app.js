@@ -4,6 +4,7 @@ let CONFIG = null;
 let currentImage = null;    // { name, url } 铭牌图片
 let attachments = [];       // [{ name, original }] 已上传附件
 let selectedOutputDir = '';
+let excelTemplateState = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -37,6 +38,8 @@ async function init() {
   $('app-title').textContent = CONFIG.title;
   document.title = CONFIG.title;
   buildFields(CONFIG.fields);
+  renderExcelTemplateStatus(CONFIG.excel_template || {});
+  if (!CONFIG.excel_enabled) $('excel-template-dropzone').hidden = true;
   if (!CONFIG.ocr_available) {
     toast('警告：OCR 引擎不可用（离线模型缺失），请检查打包', true);
   }
@@ -338,6 +341,103 @@ function renderAttachments() {
   });
 }
 
+/* ---------- Excel 模板上传与连续迭代 ---------- */
+function setupExcelTemplateUpload() {
+  const input = $('excel-template-input');
+  const dropzone = $('excel-template-dropzone');
+  const continueInput = $('continue-excel');
+
+  $('btn-pick-excel-template').addEventListener('click', () => input.click());
+  input.addEventListener('change', () => {
+    if (input.files.length) uploadExcelTemplate(input.files[0]);
+    input.value = '';
+  });
+  dropzone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropzone.classList.add('dragover');
+  });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) uploadExcelTemplate(e.dataTransfer.files[0]);
+  });
+  $('btn-reset-excel-template').addEventListener('click', resetExcelTemplate);
+  continueInput.addEventListener('change', refreshExcelTemplateDisplay);
+}
+
+async function uploadExcelTemplate(file) {
+  if (!file || !file.name.toLowerCase().endsWith('.xlsx')) {
+    toast('请选择 .xlsx 格式的 Excel 模板', true);
+    return;
+  }
+  const button = $('btn-pick-excel-template');
+  const oldText = button.textContent;
+  button.disabled = true;
+  button.textContent = '正在检查…';
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('continue_previous', $('continue-excel').checked ? 'true' : 'false');
+  try {
+    const data = await fetchJson('/api/upload_excel_template', {
+      method: 'POST',
+      body: fd,
+    });
+    renderExcelTemplateStatus(data.excel_template || {});
+    toast('Excel 模板已更新：' + (data.original || file.name));
+  } catch (e) {
+    toast('Excel 模板上传失败：' + e.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = oldText;
+  }
+}
+
+async function resetExcelTemplate() {
+  const button = $('btn-reset-excel-template');
+  button.disabled = true;
+  try {
+    const data = await fetchJson('/api/reset_excel_template', { method: 'POST' });
+    renderExcelTemplateStatus(data.excel_template || {});
+    toast('已恢复程序内置 Excel 模板');
+  } catch (e) {
+    toast('恢复模板失败：' + e.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function renderExcelTemplateStatus(state) {
+  excelTemplateState = state || {};
+  if (typeof excelTemplateState.continue_previous === 'boolean') {
+    $('continue-excel').checked = excelTemplateState.continue_previous;
+  }
+  refreshExcelTemplateDisplay();
+}
+
+function refreshExcelTemplateDisplay() {
+  const state = excelTemplateState || {};
+  const continuePrevious = $('continue-excel').checked;
+  const useLast = continuePrevious && state.last_generated_name;
+  const name = useLast ? state.last_generated_name :
+    (state.base_name || state.default_name || '未找到 Excel 模板');
+  const source = useLast ? '上一次生成结果' :
+    (state.base_source_label || '程序内置模板');
+
+  $('excel-template-name').textContent = name;
+  $('excel-template-source').textContent = '本次来源：' + source;
+  if (!continuePrevious) {
+    $('excel-template-hint').textContent =
+      '连续追加已关闭：每次都从当前基础模板新建 Excel。也可以把 .xlsx 文件拖到此处上传。';
+  } else if (state.last_generated_name) {
+    $('excel-template-hint').textContent =
+      '会在这份上次结果中继续追加新记录；上传新模板或恢复内置模板后会重新开始迭代。';
+  } else {
+    $('excel-template-hint').textContent =
+      '首次使用当前基础模板；生成成功后，下一次会自动接着该 Excel 继续追加。';
+  }
+}
+
 /* ---------- 生成文件 ---------- */
 function setupGenerate() {
   $('btn-choose-output').addEventListener('click', async () => {
@@ -372,6 +472,7 @@ async function generate() {
     image_name: currentImage ? currentImage.name : null,
     attachments: attachments,   // [{name, original}]
     output_dir: selectedOutputDir || null,
+    continue_excel: $('continue-excel').checked,
   };
 
   const btn = $('btn-generate');
@@ -384,6 +485,7 @@ async function generate() {
       body: JSON.stringify(payload),
     });
     renderOutputs(data.outputs, data.att_notes, data.output_folder);
+    if (data.excel_template) renderExcelTemplateStatus(data.excel_template);
     toast('生成成功！');
   } catch (e) {
     toast('生成失败：' + e.message, true);
@@ -433,5 +535,6 @@ document.addEventListener('DOMContentLoaded', () => {
   init();
   setupImageUpload();
   setupAttachmentUpload();
+  setupExcelTemplateUpload();
   setupGenerate();
 });

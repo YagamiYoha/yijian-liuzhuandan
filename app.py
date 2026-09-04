@@ -12,6 +12,7 @@ import os
 import platform
 import re
 import sys
+import threading
 import time
 import traceback
 import uuid
@@ -48,14 +49,17 @@ STATIC_DIR = os.path.join(resource_dir(), "static")
 CONFIG_PATH = os.path.join(BASE, "config.json")
 UPLOAD_DIR = os.path.join(BASE, "uploads")
 ATTACH_DIR = os.path.join(BASE, "uploads", "attachments")
+EXCEL_TEMPLATE_DIR = os.path.join(BASE, "uploads", "excel_templates")
 OUTPUT_DIR = os.path.join(BASE, "output")
 TEMPLATE_DIR = os.path.join(BASE, "templates")
+EXCEL_STATE_PATH = os.path.join(BASE, "excel_template_state.json")
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".webp"}
 OUTPUT_FILES = {}
 LAST_OUTPUT_DIR = OUTPUT_DIR
+EXCEL_STATE_LOCK = threading.RLock()
 
-for _d in (UPLOAD_DIR, ATTACH_DIR, OUTPUT_DIR, TEMPLATE_DIR):
+for _d in (UPLOAD_DIR, ATTACH_DIR, EXCEL_TEMPLATE_DIR, OUTPUT_DIR, TEMPLATE_DIR):
     os.makedirs(_d, exist_ok=True)
 
 
@@ -139,6 +143,146 @@ def _safe_folder_component(value, fallback):
     return value[:80] or fallback
 
 
+def _empty_excel_state():
+    return {
+        "uploaded_template": "",
+        "uploaded_original": "",
+        "last_generated_excel": "",
+        "continue_previous": True,
+    }
+
+
+def _load_excel_state():
+    """读取 Excel 模板迭代状态；文件损坏时安全回退到内置模板。"""
+    state = _empty_excel_state()
+    try:
+        with open(EXCEL_STATE_PATH, "r", encoding="utf-8") as f:
+            saved = json.load(f)
+        if not isinstance(saved, dict):
+            return state
+
+        stored_name = str(saved.get("uploaded_template") or "").strip()
+        if (stored_name == os.path.basename(stored_name) and
+                os.path.splitext(stored_name)[1].lower() == ".xlsx"):
+            state["uploaded_template"] = stored_name
+            state["uploaded_original"] = str(
+                saved.get("uploaded_original") or stored_name)
+
+        last_path = str(saved.get("last_generated_excel") or "").strip()
+        if last_path:
+            if not os.path.isabs(last_path):
+                last_path = os.path.abspath(os.path.join(BASE, last_path))
+            if os.path.splitext(last_path)[1].lower() == ".xlsx":
+                state["last_generated_excel"] = last_path
+
+        if isinstance(saved.get("continue_previous"), bool):
+            state["continue_previous"] = saved["continue_previous"]
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        log_error("读取 Excel 模板状态失败", exc)
+    return state
+
+
+def _save_excel_state(state):
+    """原子保存模板状态；保存失败不影响当次文件生成。"""
+    temp_path = EXCEL_STATE_PATH + ".tmp"
+    payload = {
+        "uploaded_template": state.get("uploaded_template", ""),
+        "uploaded_original": state.get("uploaded_original", ""),
+        "last_generated_excel": state.get("last_generated_excel", ""),
+        "continue_previous": bool(state.get("continue_previous", True)),
+    }
+    try:
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        os.replace(temp_path, EXCEL_STATE_PATH)
+    except Exception as exc:
+        log_error("保存 Excel 模板状态失败", exc)
+
+
+def _default_excel_template(cfg):
+    configured = cfg.get("excel", {}).get("template", "")
+    return os.path.abspath(os.path.join(BASE, configured))
+
+
+def _uploaded_excel_template(state):
+    name = state.get("uploaded_template", "")
+    if not name or name != os.path.basename(name):
+        return ""
+    return os.path.abspath(os.path.join(EXCEL_TEMPLATE_DIR, name))
+
+
+def _usable_excel_template(path):
+    return bool(path and os.path.isfile(path) and
+                os.path.splitext(path)[1].lower() == ".xlsx")
+
+
+def _select_excel_template(cfg, state, continue_previous):
+    """选择本次基础表：上次结果 > 用户上传模板 > 内置模板。"""
+    last_path = state.get("last_generated_excel", "")
+    if continue_previous and _usable_excel_template(last_path):
+        return last_path, "last_generated"
+
+    uploaded_path = _uploaded_excel_template(state)
+    if _usable_excel_template(uploaded_path):
+        return uploaded_path, "uploaded"
+    return _default_excel_template(cfg), "default"
+
+
+def _excel_template_status(cfg, state):
+    """返回前端显示所需信息，不暴露本机完整路径。"""
+    default_path = _default_excel_template(cfg)
+    uploaded_path = _uploaded_excel_template(state)
+    has_uploaded = _usable_excel_template(uploaded_path)
+    base_name = (state.get("uploaded_original") or
+                 os.path.basename(uploaded_path)) if has_uploaded else os.path.basename(default_path)
+    base_source = "用户上传模板" if has_uploaded else "程序内置模板"
+
+    last_path = state.get("last_generated_excel", "")
+    last_name = os.path.basename(last_path) if _usable_excel_template(last_path) else ""
+    return {
+        "default_name": os.path.basename(default_path),
+        "base_name": base_name,
+        "base_source": "uploaded" if has_uploaded else "default",
+        "base_source_label": base_source,
+        "last_generated_name": last_name,
+        "continue_previous": bool(state.get("continue_previous", True)),
+    }
+
+
+def _validate_excel_template(path):
+    """确认上传文件是 openpyxl 可读取且至少含一个工作表的 xlsx。"""
+    from openpyxl import load_workbook
+
+    workbook = None
+    try:
+        workbook = load_workbook(path, read_only=True, data_only=False)
+        if not workbook.sheetnames:
+            raise ValueError("工作簿中没有工作表")
+    finally:
+        if workbook is not None:
+            workbook.close()
+
+
+def _compose_word_engineering_trend(text_map):
+    """把三个现场选项追加到 Word 的工程动向正文中。"""
+    details = []
+    for key, label in (
+            ("safety_notice", "是否安全告知"),
+            ("site_plan_provided", "施工方是否提供平面图"),
+            ("cooperation_level", "预估施工方配合程度")):
+        value = str(text_map.get(key) or "").strip()
+        if value:
+            details.append("%s：%s" % (label, value))
+
+    body = str(text_map.get("engineering_trend") or "").strip()
+    if not details:
+        return body
+    detail_line = "；".join(details) + "。"
+    return body + ("\n" if body else "") + detail_line
+
+
 def _date_folder_component(value):
     text = str(value or "").strip()
     match = re.search(r"(\d{4})\D+(\d{1,2})\D+(\d{1,2})", text)
@@ -171,6 +315,7 @@ def create_app():
     app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="/static")
     app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 单次上传上限 200MB
     cfg = load_config()
+    excel_state = _load_excel_state()
 
     # ---------- 页面 ----------
     @app.route("/")
@@ -180,6 +325,8 @@ def create_app():
     # ---------- 配置 ----------
     @app.route("/api/config")
     def api_config():
+        with EXCEL_STATE_LOCK:
+            excel_template = _excel_template_status(cfg, excel_state)
         return jsonify({
             "title": cfg["app"].get("title", "一键流转单生成工具"),
             "fields": cfg.get("fields", []),
@@ -187,6 +334,7 @@ def create_app():
             "attachments": cfg.get("attachments", []),
             "word_enabled": cfg.get("word", {}).get("enabled", True),
             "excel_enabled": cfg.get("excel", {}).get("enabled", False),
+            "excel_template": excel_template,
             "ocr_available": ocr_engine.is_available(),
         })
 
@@ -240,6 +388,64 @@ def create_app():
         return jsonify({"ok": True, "filename": name,
                         "original": file.filename})
 
+    # ---------- Excel 模板上传与迭代状态 ----------
+    @app.route("/api/upload_excel_template", methods=["POST"])
+    def api_upload_excel_template():
+        if "file" not in request.files:
+            return jsonify({"ok": False, "error": "未收到 Excel 模板"}), 400
+        file = request.files["file"]
+        original = str(file.filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+        if os.path.splitext(original)[1].lower() != ".xlsx":
+            return jsonify({
+                "ok": False,
+                "error": "仅支持 .xlsx 格式，请先在 Excel 中另存为 xlsx",
+            }), 400
+
+        stem = os.path.splitext(original)[0]
+        safe_stem = _safe_folder_component(stem, "Excel模板")[:60]
+        stored_name = "excel_%s_%s.xlsx" % (uuid.uuid4().hex[:10], safe_stem)
+        path = os.path.join(EXCEL_TEMPLATE_DIR, stored_name)
+        try:
+            file.save(path)
+            _validate_excel_template(path)
+        except Exception as exc:
+            try:
+                if os.path.isfile(path):
+                    os.remove(path)
+            except OSError:
+                pass
+            log_error("检查用户上传的 Excel 模板失败", exc)
+            return jsonify({
+                "ok": False,
+                "error": "该文件不是可读取的 xlsx 工作簿：%s" % exc,
+            }), 400
+
+        with EXCEL_STATE_LOCK:
+            excel_state["uploaded_template"] = stored_name
+            excel_state["uploaded_original"] = original
+            excel_state["last_generated_excel"] = ""
+            posted_continue = request.form.get("continue_previous")
+            if posted_continue in ("true", "false"):
+                excel_state["continue_previous"] = posted_continue == "true"
+            _save_excel_state(excel_state)
+            status = _excel_template_status(cfg, excel_state)
+        return jsonify({
+            "ok": True,
+            "original": original,
+            "excel_template": status,
+        })
+
+    @app.route("/api/reset_excel_template", methods=["POST"])
+    def api_reset_excel_template():
+        with EXCEL_STATE_LOCK:
+            keep_continue = bool(excel_state.get("continue_previous", True))
+            excel_state.clear()
+            excel_state.update(_empty_excel_state())
+            excel_state["continue_previous"] = keep_continue
+            _save_excel_state(excel_state)
+            status = _excel_template_status(cfg, excel_state)
+        return jsonify({"ok": True, "excel_template": status})
+
     # ---------- 生成文件 ----------
     @app.route("/api/generate", methods=["POST"])
     def api_generate():
@@ -274,6 +480,8 @@ def create_app():
             phone = (text_map.get("manager2_phone", "") or
                      text_map.get("manager_phone", ""))
             text_map["responsible_info"] = (str(name) + " " + str(phone)).strip()
+        word_text_map = dict(text_map)
+        word_text_map["engineering_trend"] = _compose_word_engineering_trend(text_map)
 
         # 图片映射：即使未上传铭牌照片，也传入占位符列表，便于清理模板占位符。
         image_map = {
@@ -315,33 +523,58 @@ def create_app():
                                 "error": "Word 模板不存在：" + template}), 400
             out_name = "%s_%s.docx" % (w_cfg.get("output_prefix", "文档"), stamp)
             out_path = os.path.join(output_folder, out_name)
-            TemplateFiller.fill_word(template, out_path, text_map,
-                                     image_map, att_imgs, attachment_text,
-                                     w_cfg.get("word_bindings",
-                                               w_cfg.get("highlight_bindings", {})))
+            try:
+                TemplateFiller.fill_word(
+                    template, out_path, word_text_map,
+                    image_map, att_imgs, attachment_text,
+                    w_cfg.get("word_bindings",
+                              w_cfg.get("highlight_bindings", {})))
+            except Exception as exc:
+                log_error("生成 Word 失败", exc)
+                return jsonify({
+                    "ok": False,
+                    "error": "Word 生成失败，详细信息已写入崩溃日志：%s" % exc,
+                }), 500
             token = uuid.uuid4().hex
             OUTPUT_FILES[token] = out_path
             outputs.append({"type": "word", "name": out_name,
                             "url": "/api/download/" + token})
 
         # 生成 Excel
+        excel_template_info = None
         if cfg.get("excel", {}).get("enabled"):
             e_cfg = cfg["excel"]
-            template = os.path.join(BASE, e_cfg["template"])
-            if not os.path.isfile(template):
-                return jsonify({"ok": False,
-                                "error": "Excel 模板不存在：" + template}), 400
             out_name = "%s_%s.xlsx" % (e_cfg.get("output_prefix", "表格"), stamp)
             out_path = os.path.join(output_folder, out_name)
             sheet = e_cfg.get("sheet_name") or None
-            if e_cfg.get("append_row"):
-                TemplateFiller.append_excel_row(
-                    template, out_path, text_map, sheet,
-                    e_cfg.get("column_map", {}),
-                    owner_name=text_map.get("equipment_owner", ""),
-                    total_sheet_name=e_cfg.get("total_sheet", "危险源统计表（总表）"))
-            else:
-                TemplateFiller.fill_excel(template, out_path, text_map, sheet)
+            continue_excel = bool(data.get("continue_excel", True))
+            try:
+                with EXCEL_STATE_LOCK:
+                    excel_state["continue_previous"] = continue_excel
+                    template, _ = _select_excel_template(
+                        cfg, excel_state, continue_excel)
+                    if not _usable_excel_template(template):
+                        return jsonify({"ok": False,
+                                        "error": "Excel 模板不存在或已被移动"}), 400
+                    if e_cfg.get("append_row"):
+                        TemplateFiller.append_excel_row(
+                            template, out_path, text_map, sheet,
+                            e_cfg.get("column_map", {}),
+                            owner_name=text_map.get("equipment_owner", ""),
+                            total_sheet_name=e_cfg.get(
+                                "total_sheet", "危险源统计表（总表）"))
+                    else:
+                        TemplateFiller.fill_excel(
+                            template, out_path, text_map, sheet)
+                    excel_state["last_generated_excel"] = os.path.abspath(out_path)
+                    _save_excel_state(excel_state)
+                    excel_template_info = _excel_template_status(cfg, excel_state)
+            except Exception as exc:
+                log_error("生成 Excel 失败", exc)
+                return jsonify({
+                    "ok": False,
+                    "error": "Excel 生成失败，详细信息已写入崩溃日志：%s" % exc,
+                }), 500
             token = uuid.uuid4().hex
             OUTPUT_FILES[token] = out_path
             outputs.append({"type": "excel", "name": out_name,
@@ -349,7 +582,8 @@ def create_app():
 
         return jsonify({"ok": True, "outputs": outputs,
                         "att_notes": att_notes,
-                        "output_folder": output_folder})
+                        "output_folder": output_folder,
+                        "excel_template": excel_template_info})
 
     # ---------- 文件服务 ----------
     @app.route("/uploads/<path:filename>")

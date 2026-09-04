@@ -443,6 +443,7 @@ class TemplateFiller:
 
         # 模板采用第 2、3 行双层表头；优先使用第三行，空白时回退到第二行。
         headers = {}
+        normalized_headers = {}
         for col in range(1, ws.max_column + 1):
             parts = []
             for row in (2, 3):
@@ -453,6 +454,11 @@ class TemplateFiller:
             if header:
                 headers[header] = col
                 headers.setdefault(str(ws.cell(3, col).value or "").strip(), col)
+                for candidate in (header, ws.cell(2, col).value,
+                                  ws.cell(3, col).value):
+                    normalized = re.sub(r"\s+", "", str(candidate or ""))
+                    if normalized:
+                        normalized_headers.setdefault(normalized, col)
 
         # 在已有数据最后一行后写入，避免误覆盖历史记录。
         scan_columns = min(ws.max_column, 40)
@@ -480,6 +486,8 @@ class TemplateFiller:
 
         for header, key in column_map.items():
             col = headers.get(header)
+            if not col:
+                col = normalized_headers.get(re.sub(r"\s+", "", str(header)))
             if not col:
                 continue
             value = text_map.get(key, "")

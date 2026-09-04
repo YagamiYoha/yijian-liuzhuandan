@@ -57,7 +57,7 @@
   <section class="col">
     <div class="card">
       <div class="card-title"><span class="step">4</span>工程动向
-        <span class="tag">对应 Word 绿色区域，手动填写</span>
+        <span class="tag">写入 Word 工程动向段落，可手动填写</span>
       </div>
       <div id="trend-fields" class="fields-stack"></div>
     </div>
@@ -71,7 +71,26 @@
 
     <div class="card">
       <div class="card-title"><span class="step">6</span>Excel 补充信息
-        <span class="tag">用于追加到“万羿辉”最新空白行</span>
+        <span class="tag">可上传最新版模板，并连续追加记录</span>
+      </div>
+      <div class="excel-template-box" id="excel-template-dropzone">
+        <input type="file" id="excel-template-input" accept=".xlsx" hidden>
+        <div class="excel-template-main">
+          <div class="excel-template-caption">当前 Excel 基础模板</div>
+          <div class="excel-template-name" id="excel-template-name">正在读取模板信息…</div>
+          <div class="excel-template-source" id="excel-template-source"></div>
+        </div>
+        <div class="excel-template-actions">
+          <button class="btn btn-compact" id="btn-pick-excel-template" type="button">上传新模板</button>
+          <button class="btn btn-compact" id="btn-reset-excel-template" type="button">恢复内置模板</button>
+        </div>
+        <label class="excel-iteration-option" for="continue-excel">
+          <input type="checkbox" id="continue-excel" checked>
+          <span>自动以上一次生成的 Excel 为模板继续追加</span>
+        </label>
+        <div class="excel-template-hint" id="excel-template-hint">
+          首次生成使用当前基础模板；之后会自动接着上一次结果填写。
+        </div>
       </div>
       <div id="excel-fields" class="fields-grid"></div>
     </div>

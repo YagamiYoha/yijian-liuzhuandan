@@ -12,6 +12,8 @@ __pycache__/
 # ===== 运行时生成的数据（不提交）=====
 output/
 uploads/
+excel_template_state.json
+excel_template_state.json.tmp
 .dsh-vision-router/
 *:memory:.ses
 
@@ -28,6 +30,8 @@ uploads/
 build/
 build*/
 dist*/
+b15/
+d15/
 work/
 *.zip
 dist_一键流转单源码.zip

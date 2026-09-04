@@ -124,6 +124,11 @@ body {
 .fields-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px;
 }
+#trend-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 12px;
+}
 .field { display: flex; flex-direction: column; gap: 4px; }
 .field label { font-size: 12.5px; color: var(--text-light); }
 .field input, .field select, .field textarea {
@@ -149,6 +154,10 @@ body {
   max-height: 154px;
   overflow-y: auto;
 }
+.field-engineering_trend,
+.field-construction_change {
+  grid-column: 1 / -1;
+}
 .field-construction_change textarea {
   height: 36px;
   max-height: 36px;
@@ -172,6 +181,73 @@ body {
   position: absolute; right: 0; bottom: 0;
   width: 1px; height: 1px; opacity: 0; pointer-events: none;
   min-height: 1px; padding: 0; border: 0;
+}
+
+/* ---------- Excel 模板 ---------- */
+.excel-template-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 14px;
+  align-items: center;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px dashed #bfdbfe;
+  border-radius: 8px;
+  background: #f8faff;
+  transition: border-color .15s, background .15s;
+}
+.excel-template-box.dragover {
+  border-color: var(--primary);
+  background: #eef4ff;
+}
+.excel-template-main { min-width: 0; }
+.excel-template-caption {
+  margin-bottom: 4px;
+  color: var(--text-light);
+  font-size: 11.5px;
+}
+.excel-template-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.excel-template-source {
+  margin-top: 3px;
+  color: var(--success);
+  font-size: 11.5px;
+}
+.excel-template-actions {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+.btn-compact {
+  padding: 7px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.excel-iteration-option {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.excel-iteration-option input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+}
+.excel-template-hint {
+  grid-column: 1 / -1;
+  color: var(--text-light);
+  font-size: 11.5px;
+  line-height: 1.5;
 }
 
 /* ---------- 附件 ---------- */
@@ -274,4 +350,15 @@ body {
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
   .fields-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 640px) {
+  #trend-fields { grid-template-columns: 1fr; }
+  .field-engineering_trend,
+  .field-construction_change { grid-column: auto; }
+  .excel-template-box { grid-template-columns: 1fr; }
+  .excel-template-actions,
+  .excel-iteration-option,
+  .excel-template-hint { grid-column: auto; }
+  .excel-template-actions { flex-wrap: wrap; }
 }
